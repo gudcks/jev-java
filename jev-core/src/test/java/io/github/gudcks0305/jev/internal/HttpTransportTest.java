@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import io.github.gudcks0305.jev.JevException;
+import io.github.gudcks0305.jev.spi.JevTransport;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
@@ -184,6 +185,46 @@ class HttpTransportTest {
         } finally {
             release.countDown();
         }
+    }
+
+    @Test
+    void getsAndParsesJsonWithoutContentTypeAndRetries429() throws Exception {
+        AtomicInteger requests = new AtomicInteger();
+        HttpServer server = server(exchange -> {
+            assertEquals("GET", exchange.getRequestMethod());
+            assertEquals("fake-api-key", exchange.getRequestHeaders().getFirst("Authorization"));
+            assertEquals(null, exchange.getRequestHeaders().getFirst("Content-Type"));
+            assertEquals(0, exchange.getRequestBody().readAllBytes().length);
+            if (requests.incrementAndGet() == 1) {
+                exchange.getResponseHeaders().add("Retry-After", "0");
+                respond(exchange, 429, "rate limited");
+            } else {
+                respond(exchange, 200, "{\"models\":[]}");
+            }
+        });
+        HttpTransport transport = transport(Duration.ofSeconds(2), 1);
+
+        var result = transport.get(uri(server),
+                Map.of("Authorization", "fake-api-key", "Accept", "application/json")).join();
+
+        assertTrue(result.get("models").isArray());
+        assertEquals(2, requests.get());
+    }
+
+    @Test
+    void defaultTransportGetReturnsValidationFailure() {
+        JevTransport postOnly = new JevTransport() {
+            @Override
+            public CompletableFuture<com.fasterxml.jackson.databind.JsonNode> post(
+                    URI uri, Map<String, String> headers, com.fasterxml.jackson.databind.JsonNode body) {
+                return CompletableFuture.completedFuture(JSON.createObjectNode());
+            }
+
+            @Override
+            public void close() {}
+        };
+        JevException error = failure(postOnly.get(URI.create("https://example.test/v1/models"), Map.of()));
+        assertEquals(JevException.Kind.VALIDATION, error.kind());
     }
 
     @Test

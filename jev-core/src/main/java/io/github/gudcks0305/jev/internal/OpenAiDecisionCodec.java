@@ -28,6 +28,9 @@ final class OpenAiDecisionCodec {
         var encoded = body.putArray("questions");
         questions.forEach((id, question) -> {
             JsonNode instructions = question.instructions();
+            if (instructions == null) {
+                throw new IllegalArgumentException("OpenAI Decisions questions require instructions");
+            }
             ObjectNode entry = encoded.addObject();
             entry.put("name", id);
             if (instructions.isTextual()) {

@@ -29,7 +29,7 @@ final class ImageRequestCodec {
         content.set("state", state);
         for (JsonNode question : content.path("questions")) {
             var entry = (ObjectNode) question;
-            entry.set("instructions", context.visit(entry.path("instructions")));
+            if (entry.has("instructions")) entry.set("instructions", context.visit(entry.path("instructions")));
             if (entry.has("criteria")) entry.set("criteria", context.visit(entry.path("criteria")));
         }
         if (context.used.size() != input.images().size()) {

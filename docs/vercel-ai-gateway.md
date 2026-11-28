@@ -50,9 +50,13 @@ rejected by Vercel decision-model v4.
 Decision-model v4 sends `POST /v4/ai/decision-model` with
 `ai-decision-model-specification-version: 4`, `ai-model-id`, and a `stateParts`
 array. A file part carries `type: "file"`, `mediaType`, and tagged base64 data
-`{type: "data", data: ...}`. The Gateway supports Choice, Score, and Noul
-questions. Box is not supported by its published decision interface or answer
-schema.
+`{type: "data", data: ...}`. Since 0.7.0, the builder also accepts optional
+`.maxOutputTokens(int)` and `.reasoning(VercelJevClient.Reasoning)` (`provider-default`,
+`none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`), and question
+`instructions` may be omitted on Choice, Score, and criteria-defined Noul
+questions. Both options reject `EVALUATION_V4` before HTTP. The Gateway supports
+Choice, Score, and Noul questions. Box is not supported by its published
+decision interface or answer schema.
 
 To configure decision-model v4 in Spring Boot, add the starter and select the
 protocol:
@@ -61,6 +65,8 @@ protocol:
 jev:
   provider: vercel
   vercel-protocol: decision-v4
+  vercel-max-output-tokens: 512
+  vercel-reasoning: low
   model: typesafe-ai/jev-1.14.0
   api-key: ${AI_GATEWAY_API_KEY}
 ```
@@ -118,8 +124,8 @@ Local protocol tests cover both Vercel wire formats. A live image request to
 error code was not established, so successful live image inference remains
 unverified.
 
-Sources checked 2026-10-17: [Vercel Jev 1.14 image support](https://vercel.com/changelog/typesafe-ais-jev-1-14-is-now-available-on-ai-gateway),
+Sources re-checked 2026-11-28: [Vercel Jev 1.14 image support](https://vercel.com/changelog/typesafe-ais-jev-1-14-is-now-available-on-ai-gateway),
 [TypeSafe-compatible API](https://vercel.com/docs/ai-gateway/sdks-and-apis/typesafe),
-[current Gateway decision-model source at `fce9210`](https://github.com/vercel/ai/blob/fce9210c6405c0ad8452fee3f50717e8ea910b97/packages/gateway/src/gateway-decision-model.ts),
-[Gateway decision-model tests](https://github.com/vercel/ai/blob/fce9210c6405c0ad8452fee3f50717e8ea910b97/packages/gateway/src/gateway-decision-model.test.ts),
+[current Gateway decision-model source at `83026e8`](https://github.com/vercel/ai/blob/83026e8c7f7e73d4131c49746f4e9cb123e211c7/packages/gateway/src/gateway-decision-model.ts),
+[Gateway decision-model tests](https://github.com/vercel/ai/blob/83026e8c7f7e73d4131c49746f4e9cb123e211c7/packages/gateway/src/gateway-decision-model.test.ts),
 [older evaluation-model V4 source at `b67b1b7`](https://github.com/vercel/ai/blob/b67b1b746341ca591bd1551fde809278ae7f9f44/packages/gateway/src/gateway-evaluation-model.ts).

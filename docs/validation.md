@@ -2,6 +2,56 @@
 
 Recorded on 2026-09-20. Test judgments are examples, not an accuracy benchmark.
 
+## Upstream interface sync 0.7.0 (checked 2026-11-28)
+
+Upstream provider APIs and official SDKs were re-checked on 2026-11-28:
+- TypeSafe: OpenAPI `0.2.0` (`GET /v1/models`, `TypeSafe-Danger-Zone-Long-Context: true`,
+  `jev-latest` resolving to `jev-1.14.0`), Python SDK `v0.7.6`, JS SDK `v0.7.0`.
+- OpenRouter: Decisions OpenAPI and `OpenRouterTeam/ai-sdk-provider` commit
+  `9f6ca11` (optional question instructions, one-sided Noul criteria, `refusal`
+  answers, TypeSafe-compatible `/api/v1/systemone` route).
+- Vercel AI Gateway: `vercel/ai` `gateway-decision-model.ts` commits `0c2a9de`
+  / `83026e8` (`maxOutputTokens` and `reasoning` on `decision-model` v4).
+- OpenAI: `openai/openai-java` `4.114.0` (`273ed57`); generic blank/repeated
+  Score label preservation from PR #24 (`ef3e003`).
+- Cloudflare: Workers AI `typesafe/jev` and `typesafe/jev-1.14.0` docs.
+
+### Offline verification
+
+- `./mvnw -B -ntp clean verify -Prelease` passed **503 tests, 0 failures, 0 errors,
+  0 skips** on OpenJDK 25.0.2 with Spring Boot 3.5.16 and Java source/target
+  release 17 (`jev-core` 197, `jev-typesafe` 47, `jev-vercel` 13,
+  `jev-openrouter` 23, `jev-cloudflare` 15, `jev-openai` 140,
+  `jev-spring-webflux` 24, `jev-spring-boot-autoconfigure` 44), including
+  sources and Javadoc (`doclint=all,-missing`) packaging across all modules.
+- `./mvnw -B -ntp verify -Dspring-boot.version=4.1.1` passed the same **503 tests,
+  0 failures, 0 errors, 0 skips** on OpenJDK 25.0.2.
+- `./scripts/package-release.sh 0.7.0` produced 37 files; all 36 `SHA256SUMS`
+  entries passed `shasum -a 256 -c SHA256SUMS`.
+- `./mvnw -B -ntp clean verify -Prelease,central -pl '!examples' -Dgpg.skip=true`
+  passed Maven Central packaging checks without credentials, signing, or upload.
+- All 16 Java snippets across `README.md`, `docs/vercel-ai-gateway.md`,
+  `docs/images.md`, and `docs/openai-decisions.md` compiled cleanly with
+  `javac --release 17` against the built 0.7.0 classes and classpath.
+
+Coverage additions include loopback HTTP `GET` requests without `Content-Type`
+across JDK and WebClient transports, `JevTransport` default `get` compatibility,
+`TypeSafeJevClient.listModels()` / `listModelsAsync()`, `modelsEndpoint` and
+`baseUrl` resolution, `TypeSafe-Danger-Zone-Long-Context: true` header delivery
+and `TypeSafeRequestOptions` overrides with images and records, optional
+question instructions and one-sided Noul criteria across providers (and pre-HTTP
+rejection on OpenAI and Vercel `EVALUATION_V4`), OpenRouter `refusal` batch
+failures, and Vercel `DECISION_V4` `maxOutputTokens` / `reasoning` Java and
+Spring Boot bindings.
+
+### Live verification limit
+
+No live provider inference or model-listing calls were run for 0.7.0. Live
+behavior for `GET /v1/models`, `TypeSafe-Danger-Zone-Long-Context: true`,
+optional instructions, one-sided Noul criteria, OpenRouter `refusal` responses,
+Vercel `DECISION_V4` `maxOutputTokens`/`reasoning`, and OpenAI/Cloudflare routes
+remains unverified against production APIs in this release.
+
 ## OpenAI Decisions GA 0.6.0 (checked 2026-10-23)
 
 The [official guide](https://developers.openai.com/api/docs/guides/decisions)

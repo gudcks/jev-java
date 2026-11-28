@@ -92,6 +92,23 @@ public final class HttpTransport implements JevTransport {
                     JevException.Kind.PROTOCOL, "Unable to encode JSON request"));
         }
 
+        return submit(uri, headers, requestBody);
+    }
+
+    @Override
+    public CompletableFuture<JsonNode> get(URI uri, Map<String, String> headers) {
+        Objects.requireNonNull(uri, "uri");
+        Objects.requireNonNull(headers, "headers");
+
+        if (closed.get()) {
+            return failedFuture(closedException());
+        }
+
+        return submit(uri, headers, null);
+    }
+
+    private CompletableFuture<JsonNode> submit(
+            URI uri, Map<String, String> headers, byte[] requestBody) {
         Call call = new Call(uri, Map.copyOf(headers), requestBody);
         activeCalls.add(call);
         if (closed.get()) {
@@ -184,8 +201,12 @@ public final class HttpTransport implements JevTransport {
             final HttpRequest request;
             try {
                 HttpRequest.Builder builder = HttpRequest.newBuilder(uri)
-                        .timeout(Duration.ofNanos(remainingNanos))
-                        .POST(HttpRequest.BodyPublishers.ofByteArray(requestBody));
+                        .timeout(Duration.ofNanos(remainingNanos));
+                if (requestBody == null) {
+                    builder.GET();
+                } else {
+                    builder.POST(HttpRequest.BodyPublishers.ofByteArray(requestBody));
+                }
                 headers.forEach(builder::header);
                 request = builder.build();
             } catch (RuntimeException exception) {

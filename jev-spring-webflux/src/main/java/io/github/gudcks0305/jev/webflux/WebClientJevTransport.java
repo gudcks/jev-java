@@ -88,6 +88,31 @@ public final class WebClientJevTransport implements JevTransport {
                     JevException.Kind.PROTOCOL, "Unable to encode JSON request"));
         }
 
+        return submit(uri, requestHeaders, requestBody);
+    }
+
+    @Override
+    public CompletableFuture<JsonNode> get(URI uri, Map<String, String> headers) {
+        Objects.requireNonNull(uri, "uri");
+        Objects.requireNonNull(headers, "headers");
+
+        if (closed.get()) {
+            return failedFuture(closedException());
+        }
+
+        final Map<String, String> requestHeaders;
+        try {
+            requestHeaders = Map.copyOf(headers);
+        } catch (RuntimeException exception) {
+            return failedFuture(new JevException(
+                    JevException.Kind.VALIDATION, "Invalid HTTP request"));
+        }
+
+        return submit(uri, requestHeaders, null);
+    }
+
+    private CompletableFuture<JsonNode> submit(
+            URI uri, Map<String, String> requestHeaders, byte[] requestBody) {
         Call call = new Call(uri, requestHeaders, requestBody);
         activeCalls.add(call);
         if (closed.get()) {
@@ -111,12 +136,14 @@ public final class WebClientJevTransport implements JevTransport {
     private Mono<JsonNode> attempt(URI uri, Map<String, String> headers, byte[] body, int retriesUsed) {
         return Mono.defer(() -> {
             try {
-                return client.post()
-                        .uri(uri)
-                        .headers(httpHeaders -> headers.forEach(httpHeaders::set))
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .bodyValue(body)
-                        .exchangeToMono(response -> {
+                WebClient.RequestHeadersSpec<?> spec = body == null
+                        ? client.get().uri(uri).headers(httpHeaders -> headers.forEach(httpHeaders::set))
+                        : client.post()
+                                .uri(uri)
+                                .headers(httpHeaders -> headers.forEach(httpHeaders::set))
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .bodyValue(body);
+                return spec.exchangeToMono(response -> {
                             int status = response.statusCode().value();
                             if (status >= 200 && status < 300) {
                                 return response.bodyToMono(String.class)

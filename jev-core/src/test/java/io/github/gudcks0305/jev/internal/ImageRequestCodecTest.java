@@ -3,10 +3,13 @@ package io.github.gudcks0305.jev.internal;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fasterxml.jackson.databind.util.RawValue;
+import io.github.gudcks0305.jev.ChoiceQuestion;
 import io.github.gudcks0305.jev.JevImage;
 import io.github.gudcks0305.jev.JevInput;
 import io.github.gudcks0305.jev.NoulQuestion;
 import io.github.gudcks0305.jev.Question;
+import io.github.gudcks0305.jev.ScoreQuestion;
+import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -71,5 +74,20 @@ class ImageRequestCodecTest {
             assertEquals(image.reference(), content.at("/questions/same/criteria/true").textValue());
             assertTrue(content.path("assets").has(image.reference()));
         }
+    }
+
+    @Test void optionalInstructionsRemainAbsentWhenImageAppearsOnlyInCriteria() {
+        var image = JevImage.fromBytes(new byte[]{1}, "png");
+        var choice = ChoiceQuestion.of("choice", Map.of("yes", image.reference()));
+        var score = ScoreQuestion.of("score", List.of("Low", image.reference()));
+        var noul = NoulQuestion.ofCriteria("noul", image.reference(), null);
+        var body = EvaluationCodec.request(JevInput.withImages("Compare", image),
+                Map.of("choice", choice, "score", score, "noul", noul), "jev-1.14.0", WireFormat.TYPESAFE);
+        assertFalse(body.at("/questions/choice").has("instructions"));
+        assertFalse(body.at("/questions/score").has("instructions"));
+        assertFalse(body.at("/questions/noul").has("instructions"));
+        assertEquals(image.reference(), body.at("/questions/noul/criteria/true").textValue());
+        assertFalse(body.at("/questions/noul/criteria").has("false"));
+        assertTrue(body.path("assets").has(image.reference()));
     }
 }

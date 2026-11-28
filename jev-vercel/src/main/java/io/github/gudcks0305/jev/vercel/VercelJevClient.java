@@ -15,10 +15,38 @@ import java.util.Objects;
 /** Experimental adapter for Vercel AI Gateway's evaluation and decision v4 protocols. */
 public final class VercelJevClient extends AbstractJevClient {
     public enum Protocol { EVALUATION_V4, DECISION_V4 }
+
+    /** Reasoning effort forwarded on Vercel decision-model v4 requests. */
+    public enum Reasoning {
+        PROVIDER_DEFAULT("provider-default"),
+        NONE("none"),
+        MINIMAL("minimal"),
+        LOW("low"),
+        MEDIUM("medium"),
+        HIGH("high"),
+        XHIGH("xhigh"),
+        MAX("max");
+
+        private final String wireValue;
+
+        Reasoning(String wireValue) {
+            this.wireValue = wireValue;
+        }
+
+        public String wireValue() {
+            return wireValue;
+        }
+    }
+
     private final Protocol protocol;
+    private final Integer maxOutputTokens;
+    private final Reasoning reasoning;
+
     private VercelJevClient(Builder builder) {
         super(builder.configuration(), builder.protocol == Protocol.DECISION_V4 ? WireFormat.VERCEL_DECISION : WireFormat.VERCEL);
         this.protocol = builder.protocol;
+        this.maxOutputTokens = builder.maxOutputTokens;
+        this.reasoning = builder.reasoning;
     }
     public static Builder builder() { return new Builder(); }
 
@@ -29,10 +57,23 @@ public final class VercelJevClient extends AbstractJevClient {
             }
             ObjectNode body = EvaluationCodec.request("state parts", questions, configuredModel(), WireFormat.VERCEL_DECISION);
             body.set("stateParts", input.stateParts());
-            return checked(body);
+            return checked(applyDecisionOptions(body));
         }
         JsonNode body = super.encodeRequest(state, questions);
-        return protocol == Protocol.DECISION_V4 ? checked(body) : body;
+        if (protocol != Protocol.DECISION_V4) {
+            return body;
+        }
+        return checked(applyDecisionOptions((ObjectNode) body));
+    }
+
+    private ObjectNode applyDecisionOptions(ObjectNode body) {
+        if (maxOutputTokens != null) {
+            body.put("maxOutputTokens", maxOutputTokens);
+        }
+        if (reasoning != null) {
+            body.put("reasoning", reasoning.wireValue());
+        }
+        return body;
     }
 
     private static JsonNode checked(JsonNode body) {
@@ -44,13 +85,32 @@ public final class VercelJevClient extends AbstractJevClient {
 
     public static final class Builder extends ClientBuilder<Builder> {
         private Protocol protocol = Protocol.EVALUATION_V4;
+        private Integer maxOutputTokens;
+        private Reasoning reasoning;
+
         private Builder() {}
         public Builder protocol(Protocol protocol) { this.protocol = Objects.requireNonNull(protocol, "protocol"); return this; }
+        /** Optional output token limit for decision-model v4 requests. */
+        public Builder maxOutputTokens(int maxOutputTokens) {
+            if (maxOutputTokens <= 0) throw new IllegalArgumentException("maxOutputTokens must be positive");
+            this.maxOutputTokens = maxOutputTokens;
+            return this;
+        }
+        /** Optional reasoning effort for decision-model v4 requests. */
+        public Builder reasoning(Reasoning reasoning) {
+            this.reasoning = Objects.requireNonNull(reasoning, "reasoning");
+            return this;
+        }
         @Override protected Builder self() { return this; }
         private Config configuration() {
             return configure("AI_GATEWAY_API_KEY", "typesafe-ai/jev", URI.create("https://ai-gateway.vercel.sh"),
                     protocol == Protocol.DECISION_V4 ? "v4/ai/decision-model" : "v4/ai/evaluation-model");
         }
-        public VercelJevClient build() { return new VercelJevClient(this); }
+        public VercelJevClient build() {
+            if (protocol != Protocol.DECISION_V4 && (maxOutputTokens != null || reasoning != null)) {
+                throw new IllegalArgumentException("maxOutputTokens and reasoning require decision-model v4");
+            }
+            return new VercelJevClient(this);
+        }
     }
 }

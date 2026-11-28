@@ -3,9 +3,13 @@ package io.github.gudcks0305.jev.typesafe;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.sun.net.httpserver.HttpServer;
 import io.github.gudcks0305.jev.*;
+import io.github.gudcks0305.jev.schema.JevSchema;
 import io.github.gudcks0305.jev.spi.JevTransport;
+import java.net.InetSocketAddress;
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -15,6 +19,7 @@ import java.util.concurrent.CompletionException;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -195,6 +200,153 @@ class TypeSafeJevClientTest {
         }
     }
 
+    @Test void listsModelsOverHttpAndProtectsRawResponse() throws Exception {
+        var method = new AtomicReference<String>();
+        var authorization = new AtomicReference<String>();
+        var accept = new AtomicReference<String>();
+        var userAgent = new AtomicReference<String>();
+        var contentType = new AtomicReference<String>();
+        var imagesHeader = new AtomicReference<String>();
+        var longContextHeader = new AtomicReference<String>();
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/v1/models", exchange -> {
+            method.set(exchange.getRequestMethod());
+            authorization.set(exchange.getRequestHeaders().getFirst("Authorization"));
+            accept.set(exchange.getRequestHeaders().getFirst("Accept"));
+            userAgent.set(exchange.getRequestHeaders().getFirst("User-Agent"));
+            contentType.set(exchange.getRequestHeaders().getFirst("Content-Type"));
+            imagesHeader.set(exchange.getRequestHeaders().getFirst("TypeSafe-Danger-Zone-Images"));
+            longContextHeader.set(exchange.getRequestHeaders().getFirst("TypeSafe-Danger-Zone-Long-Context"));
+            byte[] payload = """
+                    {"models":[{"name":"jev-latest","description":"Latest stable model","release_date":"2026-10-14"},
+                               {"name":"jev-1.14.0","description":"Jev 1.14","release_date":"2026-10-14"}]}
+                    """.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, payload.length);
+            exchange.getResponseBody().write(payload);
+            exchange.close();
+        });
+        server.start();
+        try (var client = TypeSafeJevClient.builder()
+                .apiKey("test-key")
+                .longContext(true)
+                .baseUrl(URI.create("http://127.0.0.1:" + server.getAddress().getPort()))
+                .maxRetries(0)
+                .build()) {
+            TypeSafeModelList list = client.listModels();
+            assertEquals("GET", method.get());
+            assertEquals("Bearer test-key", authorization.get());
+            assertEquals("application/json", accept.get());
+            assertEquals("jev-java/0.7.0", userAgent.get());
+            assertNull(contentType.get());
+            assertNull(imagesHeader.get());
+            assertNull(longContextHeader.get());
+            assertEquals(2, list.models().size());
+            assertEquals(new TypeSafeModel("jev-latest", "Latest stable model", "2026-10-14"), list.models().get(0));
+            ((ObjectNode) list.rawResponse()).removeAll();
+            assertEquals(2, list.rawResponse().path("models").size());
+            assertThrows(UnsupportedOperationException.class, () -> list.models().clear());
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test void resolvesModelsEndpointsValidatesCatalogAndPropagatesCancellation() throws Exception {
+        JsonNode catalog = JSON.readTree("""
+                {"models":[{"name":"jev-latest","description":"Stable","release_date":"2026-10-14"}]}
+                """);
+        Stub defaultStub = new Stub(catalog);
+        try (var client = client(defaultStub)) {
+            client.listModelsAsync().join();
+            assertEquals(URI.create("https://api.typesafe.ai/v1/models"), defaultStub.uri);
+        }
+
+        Stub customBase = new Stub(catalog);
+        try (var client = TypeSafeJevClient.builder().apiKey("test-key")
+                .baseUrl(URI.create("https://proxy.example/root/")).transport(customBase).build()) {
+            client.listModels();
+            assertEquals(URI.create("https://proxy.example/root/v1/models"), customBase.uri);
+        }
+
+        Stub endpointOnly = new Stub(catalog);
+        try (var client = TypeSafeJevClient.builder().apiKey("test-key")
+                .endpoint(URI.create("https://proxy.example/custom/systemone")).transport(endpointOnly).build()) {
+            assertThrows(IllegalStateException.class, client::listModelsAsync);
+            assertNull(endpointOnly.uri);
+            client.close();
+            assertEquals(JevException.Kind.CLOSED,
+                    ((JevException) assertThrows(CompletionException.class, () -> client.listModelsAsync().join()).getCause()).kind());
+        }
+
+        Stub explicitModels = new Stub(catalog);
+        URI modelsUri = URI.create("https://proxy.example/custom/models?v=1");
+        try (var client = TypeSafeJevClient.builder().apiKey("test-key")
+                .endpoint(URI.create("https://proxy.example/custom/systemone"))
+                .modelsEndpoint(modelsUri).transport(explicitModels).build()) {
+            assertEquals(1, client.listModels().models().size());
+            assertEquals(modelsUri, explicitModels.uri);
+        }
+
+        for (String badJson : List.of("[]", "{}", "{\"models\":{}}",
+                "{\"models\":[{\"name\":\"\",\"description\":\"d\",\"release_date\":\"2026-10-14\"}]}",
+                "{\"models\":[{\"name\":\"jev\",\"release_date\":\"2026-10-14\"}]}",
+                "{\"models\":[{\"name\":\"jev\",\"description\":\"d\"}]}")) {
+            try (var client = client(new Stub(JSON.readTree(badJson)))) {
+                var err = assertThrows(JevException.class, client::listModels);
+                assertEquals(JevException.Kind.PROTOCOL, err.kind());
+            }
+        }
+
+        Stub cancelStub = new Stub();
+        try (var client = client(cancelStub)) {
+            var pending = client.listModelsAsync();
+            assertTrue(pending.cancel(true));
+            assertTrue(cancelStub.pending.isCancelled());
+        }
+    }
+
+    @Test void sendsLongContextHeaderAndPerRequestOverridesIncludingWithImagesAndRecords() throws Exception {
+        Stub stub = new Stub(response());
+        try (var client = TypeSafeJevClient.builder().apiKey("test-key").longContext(true).transport(stub).build()) {
+            client.evaluate("state", route, urgent, score);
+            assertEquals("true", stub.headers.get("TypeSafe-Danger-Zone-Long-Context"));
+            assertFalse(stub.headers.containsKey("TypeSafe-Danger-Zone-Images"));
+
+            var disableOverride = TypeSafeRequestOptions.builder().longContext(false).model("jev-1.14.0").build();
+            var typed = client.evaluate("state", disableOverride, MappedTicket.class);
+            assertEquals(Team.BILLING, typed.value().route());
+            assertFalse(stub.headers.containsKey("TypeSafe-Danger-Zone-Long-Context"));
+            assertEquals("jev-1.14.0", stub.body.path("model").asText());
+        }
+
+        Stub defaultOff = new Stub(response());
+        var image = JevImage.fromBytes(new byte[]{1, 2, 3}, "png");
+        try (var client = client(defaultOff)) {
+            client.evaluate("state", route, urgent, score);
+            assertFalse(defaultOff.headers.containsKey("TypeSafe-Danger-Zone-Long-Context"));
+
+            var schema = JevSchema.of(MappedTicket.class);
+            var typed = client.evaluateAsync(JevInput.withImages(Map.of("photo", image.reference()), image),
+                    TypeSafeRequestOptions.withLongContext(), schema).join();
+            assertEquals(Team.BILLING, typed.value().route());
+            assertEquals("true", defaultOff.headers.get("TypeSafe-Danger-Zone-Long-Context"));
+            assertEquals("true", defaultOff.headers.get("TypeSafe-Danger-Zone-Images"));
+        }
+
+        Stub cancelStub = new Stub();
+        try (var client = client(cancelStub)) {
+            var schemaFuture = client.evaluateAsync("state", TypeSafeRequestOptions.withLongContext(), MappedTicket.class);
+            assertTrue(schemaFuture.cancel(true));
+            assertTrue(cancelStub.pending.isCancelled());
+        }
+
+        assertThrows(IllegalArgumentException.class, () -> TypeSafeRequestOptions.builder().model(" ").build());
+        assertThrows(IllegalArgumentException.class, () -> TypeSafeRequestOptions.builder().model("jev\n1").build());
+        assertThrows(NullPointerException.class, () -> TypeSafeJevClient.builder().modelsEndpoint(null));
+        assertThrows(IllegalArgumentException.class, () -> TypeSafeJevClient.builder()
+                .modelsEndpoint(URI.create("https://user:pass@example.com/models")));
+    }
+
     private TypeSafeJevClient client(Stub transport) { return TypeSafeJevClient.builder().apiKey("test-key").transport(transport).build(); }
     private JsonNode response() throws Exception {
         return JSON.readTree("""
@@ -217,6 +369,11 @@ class TypeSafeJevClientTest {
         Stub(JsonNode response) { pending.complete(response); }
         @Override public CompletableFuture<JsonNode> post(URI uri, Map<String, String> headers, JsonNode body) {
             this.uri = uri; this.headers = headers; this.body = body;
+            started.countDown();
+            return pending;
+        }
+        @Override public CompletableFuture<JsonNode> get(URI uri, Map<String, String> headers) {
+            this.uri = uri; this.headers = headers; this.body = null;
             started.countDown();
             return pending;
         }

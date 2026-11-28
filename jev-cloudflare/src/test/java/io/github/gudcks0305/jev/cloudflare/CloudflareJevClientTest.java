@@ -57,7 +57,7 @@ class CloudflareJevClientTest {
             assertEquals("/custom/run", path.get());
             assertEquals("tenant=acme", query.get());
             assertEquals("Bearer test-token", authorization.get());
-            assertEquals("jev-java/0.6.0", userAgent.get());
+            assertEquals("jev-java/0.7.0", userAgent.get());
             assertEquals("typesafe/jev", requestBody.get().path("model").asText());
             assertEquals("Three days late", requestBody.get().at("/input/state/message").asText());
             assertEquals("noul", requestBody.get().at("/input/questions/urgent/type").asText());
@@ -169,6 +169,28 @@ class CloudflareJevClientTest {
         }
     }
 
+    @Test
+    void omitsNullInstructionsAndOneSidedNoulCriteriaInCloudflareInput() throws Exception {
+        JsonNode response = JSON.readTree("""
+                {"model":"jev-1.14.0","answers":{"urgent":{"type":"noul","noul":0.8},"team":{"type":"choice","choice":"a","probabilities":{"a":0.9,"b":0.1}}}}
+                """);
+        var capturing = new CapturingStub(response);
+        try (var client = CloudflareJevClient.builder()
+                .apiKey("test-token")
+                .endpoint(URI.create("https://proxy.example.test/run"))
+                .transport(capturing)
+                .build()) {
+            var noul = NoulQuestion.ofCriteria("urgent", "Time critical", null);
+            var choice = ChoiceQuestion.of("team", Map.of("a", "Team A", "b", "Team B"));
+            var result = client.evaluate("state", noul, choice);
+            assertEquals(.8, result.answer(noul).probability());
+            assertFalse(capturing.body.at("/input/questions/urgent").has("instructions"));
+            assertEquals("Time critical", capturing.body.at("/input/questions/urgent/criteria/true").asText());
+            assertFalse(capturing.body.at("/input/questions/urgent/criteria").has("false"));
+            assertFalse(capturing.body.at("/input/questions/team").has("instructions"));
+        }
+    }
+
     private static JsonNode directResponse() {
         try {
             return JSON.readTree("""
@@ -203,6 +225,24 @@ class CloudflareJevClientTest {
         @Override
         public CompletableFuture<JsonNode> post(URI uri, Map<String, String> headers, JsonNode body) {
             this.uri = uri;
+            return CompletableFuture.completedFuture(response);
+        }
+
+        @Override
+        public void close() {}
+    }
+
+    private static final class CapturingStub implements JevTransport {
+        private final JsonNode response;
+        private JsonNode body;
+
+        private CapturingStub(JsonNode response) {
+            this.response = response;
+        }
+
+        @Override
+        public CompletableFuture<JsonNode> post(URI uri, Map<String, String> headers, JsonNode body) {
+            this.body = body;
             return CompletableFuture.completedFuture(response);
         }
 

@@ -33,6 +33,11 @@ public abstract class ClientBuilder<B extends ClientBuilder<B>> {
     /** Whether the caller supplied a complete endpoint URL. */
     protected final boolean hasEndpointOverride() { return endpoint != null; }
 
+    /** Validates a full endpoint URL including path and optional query. */
+    protected static void validateEndpoint(URI uri, String field) {
+        validateUrl(Objects.requireNonNull(uri, field), field, true);
+    }
+
     protected Config configure(String keyEnvironment, String defaultModel, URI defaultBaseUrl, String path) {
         String key = apiKey == null ? System.getenv(keyEnvironment) : apiKey;
         if (key == null || key.isBlank()) throw new IllegalArgumentException("Set apiKey or " + keyEnvironment);
@@ -41,13 +46,16 @@ public abstract class ClientBuilder<B extends ClientBuilder<B>> {
         if (modelId.chars().anyMatch(c -> c < 32 || c == 127)) throw new IllegalArgumentException("Invalid model format");
         if (baseUrl != null && endpoint != null) throw new IllegalArgumentException("Configure either baseUrl or endpoint, not both");
         URI target;
+        URI normalizedBase = null;
         if (endpoint != null) {
             validateUrl(endpoint, "endpoint", true);
             target = endpoint;
         } else {
             URI base = baseUrl == null ? defaultBaseUrl : baseUrl;
             validateUrl(base, "baseUrl", false);
-            target = URI.create(base.toString().replaceAll("/+$", "") + "/" + path);
+            String baseText = base.toString().replaceAll("/+$", "");
+            normalizedBase = URI.create(baseText);
+            target = URI.create(baseText + "/" + path);
         }
         if (timeout.isZero() || timeout.isNegative() || timeout.compareTo(Duration.ofDays(1)) > 0) {
             throw new IllegalArgumentException("timeout must be positive and at most 1 day");
@@ -55,7 +63,7 @@ public abstract class ClientBuilder<B extends ClientBuilder<B>> {
         if (maxRetries < 0 || maxRetries > 10) throw new IllegalArgumentException("maxRetries must be between 0 and 10");
         if (transport != null && httpClient != null) throw new IllegalArgumentException("Configure either transport or httpClient, not both");
         JevTransport selected = transport == null ? new HttpTransport(httpClient == null ? DefaultHttp.CLIENT : httpClient, timeout, maxRetries) : transport;
-        return new Config(key, modelId, target, selected, transport == null);
+        return new Config(key, modelId, target, normalizedBase, selected, transport == null);
     }
 
     private static void validateUrl(URI uri, String field, boolean allowQuery) {
@@ -71,12 +79,14 @@ public abstract class ClientBuilder<B extends ClientBuilder<B>> {
         final String apiKey;
         final String model;
         final URI endpoint;
+        final URI baseUrl;
         final JevTransport transport;
         final boolean ownsTransport;
-        Config(String apiKey, String model, URI endpoint, JevTransport transport, boolean ownsTransport) {
+        Config(String apiKey, String model, URI endpoint, URI baseUrl, JevTransport transport, boolean ownsTransport) {
             this.apiKey = apiKey;
             this.model = model;
             this.endpoint = endpoint;
+            this.baseUrl = baseUrl;
             this.transport = transport;
             this.ownsTransport = ownsTransport;
         }

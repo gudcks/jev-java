@@ -12,8 +12,9 @@ public final class ChoiceQuestion<T> extends Question<ChoiceAnswer<T>> {
     private final Map<String, T> options;
     private final JsonNode criteria;
 
-    private ChoiceQuestion(String id, Object instructions, Map<String, T> options, JsonNode criteria) {
-        super(id, instructions);
+    private ChoiceQuestion(String id, Object instructions, boolean allowNullInstructions,
+                           Map<String, T> options, JsonNode criteria) {
+        super(id, instructions, allowNullInstructions);
         if (options.isEmpty()) throw new IllegalArgumentException("Choice needs at least one option");
         options.keySet().forEach(key -> JsonSupport.nonBlank(key, "Option label"));
         this.options = Collections.unmodifiableMap(new LinkedHashMap<>(options));
@@ -21,6 +22,16 @@ public final class ChoiceQuestion<T> extends Question<ChoiceAnswer<T>> {
     }
 
     public static <E extends Enum<E>> ChoiceQuestion<E> of(String id, Object instructions, Class<E> type) {
+        return createEnum(id, instructions, false, type);
+    }
+
+    /** Creates an enum choice question without explicit instructions when criteria labels are self-descriptive. */
+    public static <E extends Enum<E>> ChoiceQuestion<E> of(String id, Class<E> type) {
+        return createEnum(id, null, true, type);
+    }
+
+    private static <E extends Enum<E>> ChoiceQuestion<E> createEnum(
+            String id, Object instructions, boolean allowNullInstructions, Class<E> type) {
         Objects.requireNonNull(type, "Enum type is required");
         Map<String, E> options = new LinkedHashMap<>();
         var criteria = JsonSupport.object();
@@ -28,15 +39,25 @@ public final class ChoiceQuestion<T> extends Question<ChoiceAnswer<T>> {
             options.put(value.name(), value);
             criteria.putNull(value.name());
         }
-        return new ChoiceQuestion<>(id, instructions, options, criteria);
+        return new ChoiceQuestion<>(id, instructions, allowNullInstructions, options, criteria);
     }
 
     /** Criteria maps labels to descriptions (string/structured JSON) or null. */
     public static ChoiceQuestion<String> of(String id, Object instructions, Map<String, ?> criteria) {
+        return createMap(id, instructions, false, criteria);
+    }
+
+    /** Creates a choice question without explicit instructions when criteria define the decision. */
+    public static ChoiceQuestion<String> of(String id, Map<String, ?> criteria) {
+        return createMap(id, null, true, criteria);
+    }
+
+    private static ChoiceQuestion<String> createMap(
+            String id, Object instructions, boolean allowNullInstructions, Map<String, ?> criteria) {
         Objects.requireNonNull(criteria, "Criteria is required");
         Map<String, String> options = new LinkedHashMap<>();
         criteria.keySet().forEach(key -> options.put(key, key));
-        return new ChoiceQuestion<>(id, instructions, options, JsonSupport.json(criteria));
+        return new ChoiceQuestion<>(id, instructions, allowNullInstructions, options, JsonSupport.json(criteria));
     }
 
     /** Returns a new question with descriptions for every option. Use the new question to retrieve answers. */
@@ -47,7 +68,7 @@ public final class ChoiceQuestion<T> extends Question<ChoiceAnswer<T>> {
         }
         var node = JsonSupport.object();
         options.forEach((label, value) -> node.set(label, JsonSupport.json(descriptions.get(value))));
-        return new ChoiceQuestion<>(id(), instructions(), options, node);
+        return new ChoiceQuestion<>(id(), instructions(), true, options, node);
     }
 
     public Map<String, T> options() { return options; }

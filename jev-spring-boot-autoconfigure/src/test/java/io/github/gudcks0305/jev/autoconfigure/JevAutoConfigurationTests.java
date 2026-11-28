@@ -1,7 +1,10 @@
 package io.github.gudcks0305.jev.autoconfigure;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.sun.net.httpserver.HttpServer;
+import java.net.InetSocketAddress;
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -246,7 +249,58 @@ class JevAutoConfigurationTests {
                     assertThat(properties.getBaseUrl()).isEqualTo(URI.create("https://example.test/api"));
                     assertThat(properties.getTimeout()).isEqualTo(Duration.ofSeconds(5));
                     assertThat(properties.getMaxRetries()).isEqualTo(4);
+                    assertThat(properties.isLongContext()).isFalse();
                 });
+    }
+
+    @Test
+    void bindsLongContextForTypeSafeOnlyAndListsModelsThroughAutoConfiguredTransports() throws Exception {
+        this.contextRunner
+                .withUserConfiguration(CapturingTransportConfiguration.class)
+                .withPropertyValues("jev.api-key=fixture-key", "jev.provider=typesafe",
+                        "jev.long-context=true", "jev.transport=webclient")
+                .run(context -> {
+                    assertThat(context.getBean(JevProperties.class).isLongContext()).isTrue();
+                    var transport = context.getBean(CapturingTransport.class);
+                    context.getBean(JevClient.class).evaluateAsync("state", NoulQuestion.of("q", "Check")).cancel(true);
+                    assertThat(transport.headers).containsEntry("TypeSafe-Danger-Zone-Long-Context", "true");
+                });
+
+        this.contextRunner
+                .withUserConfiguration(CapturingTransportConfiguration.class)
+                .withPropertyValues("jev.api-key=fixture-key", "jev.provider=openrouter",
+                        "jev.long-context=true", "jev.transport=webclient")
+                .run(context -> {
+                    var transport = context.getBean(CapturingTransport.class);
+                    context.getBean(JevClient.class).evaluateAsync("state", NoulQuestion.of("q", "Check")).cancel(true);
+                    assertThat(transport.headers).doesNotContainKey("TypeSafe-Danger-Zone-Long-Context");
+                });
+
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/v1/models", exchange -> {
+            byte[] payload = "{\"models\":[{\"name\":\"jev-latest\",\"description\":\"Stable\",\"release_date\":\"2026-10-14\"}]}"
+                    .getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, payload.length);
+            exchange.getResponseBody().write(payload);
+            exchange.close();
+        });
+        server.start();
+        try {
+            String baseUrl = "http://127.0.0.1:" + server.getAddress().getPort();
+            for (String transport : java.util.List.of("jdk", "webclient")) {
+                this.contextRunner
+                        .withPropertyValues("jev.api-key=fixture-key", "jev.provider=typesafe",
+                                "jev.transport=" + transport, "jev.base-url=" + baseUrl, "jev.max-retries=0")
+                        .run(context -> {
+                            var models = context.getBean(TypeSafeJevClient.class).listModels();
+                            assertThat(models.models()).hasSize(1);
+                            assertThat(models.models().get(0).name()).isEqualTo("jev-latest");
+                        });
+            }
+        } finally {
+            server.stop(0);
+        }
     }
 
     @Test

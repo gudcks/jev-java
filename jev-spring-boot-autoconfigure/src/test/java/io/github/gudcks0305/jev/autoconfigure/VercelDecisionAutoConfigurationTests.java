@@ -43,8 +43,33 @@ class VercelDecisionAutoConfigurationTests {
                     assertThat(transport.body.has("state")).isTrue();
                     assertThat(transport.headers).containsKey("ai-evaluation-model-specification-version");
                 });
-        runner.withPropertyValues("jev.provider=typesafe", "jev.api-key=fixture-key", "jev.vercel-protocol=unknown")
+        runner.withPropertyValues("jev.provider=typesafe", "jev.api-key=fixture-key", "jev.vercel-protocol=unknown",
+                        "jev.vercel-max-output-tokens=100", "jev.vercel-reasoning=unknown")
                 .run(context -> assertThat(context).hasNotFailed());
+    }
+
+    @Test void bindsVercelMaxOutputTokensAndReasoningOnDecisionV4AndRejectsInvalidCombinations() {
+        runner.withUserConfiguration(TransportConfiguration.class)
+                .withPropertyValues("jev.provider=vercel", "jev.api-key=fixture-key", "jev.transport=webclient",
+                        "jev.vercel-protocol=decision-v4", "jev.vercel-max-output-tokens=256",
+                        "jev.vercel-reasoning=XHIGH")
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    context.getBean(JevClient.class).evaluateAsync("state", PRESENT).cancel(true);
+                    var transport = context.getBean(Capture.class);
+                    assertThat(transport.body.path("maxOutputTokens").intValue()).isEqualTo(256);
+                    assertThat(transport.body.path("reasoning").textValue()).isEqualTo("xhigh");
+                });
+
+        runner.withPropertyValues("jev.provider=vercel", "jev.api-key=fixture-key",
+                        "jev.vercel-protocol=evaluation-v4", "jev.vercel-max-output-tokens=256")
+                .run(context -> assertThat(context).hasFailed());
+        runner.withPropertyValues("jev.provider=vercel", "jev.api-key=fixture-key",
+                        "jev.vercel-protocol=decision-v4", "jev.vercel-max-output-tokens=0")
+                .run(context -> assertThat(context).hasFailed());
+        runner.withPropertyValues("jev.provider=vercel", "jev.api-key=fixture-key",
+                        "jev.vercel-protocol=decision-v4", "jev.vercel-reasoning=invalid")
+                .run(context -> assertThat(context).hasFailed());
     }
 
     @ParameterizedTest

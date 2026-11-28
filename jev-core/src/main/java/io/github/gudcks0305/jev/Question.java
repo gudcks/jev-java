@@ -9,9 +9,16 @@ public abstract sealed class Question<A extends Answer> permits ChoiceQuestion, 
     private final JsonNode instructions;
 
     protected Question(String id, Object instructions) {
-        this.id = JsonSupport.nonBlank(id, "Question id");
-        this.instructions = JsonSupport.content(instructions, "Instructions");
+        this(id, instructions, false);
     }
+
+    protected Question(String id, Object instructions, boolean allowNullInstructions) {
+        this.id = JsonSupport.nonBlank(id, "Question id");
+        this.instructions = allowNullInstructions && instructions == null
+                ? null : JsonSupport.content(instructions, "Instructions");
+    }
+
     public final String id() { return id; }
-    public final JsonNode instructions() { return instructions.deepCopy(); }
+    /** Question instructions, or null when omitted on Choice, Score, or criteria-defined Noul questions. */
+    public final JsonNode instructions() { return instructions == null ? null : instructions.deepCopy(); }
 }
