@@ -142,11 +142,11 @@ for Java and Spring configuration.
 
 ## Contract and verification
 
-The model catalog currently maps `jev-latest` to stable `jev-1.13.0` and
-`jev-preview` to `jev-1.14.0`. Jev 1.13 and 1.14 accept images. Box requires
-Jev 1.14, so use a versioned model ID for reproducibility. TypeSafe's model
-table still lists text input, while the dedicated images guide documents image
-support; this SDK follows the dedicated images contract for the feature.
+Checked 2026-11-28: TypeSafe's alias table now maps both `jev-latest` and
+`jev-preview` to `jev-1.14.0`, and the model table lists text and image input
+for both `jev-1.13.0` and `jev-1.14.0`. Jev 1.13 and 1.14 accept images, while
+Box requires Jev 1.14; continue pinning `.model("jev-1.14.0")` for
+reproducibility across alias moves.
 
 OpenRouter and Cloudflare were implemented against their documented image and
 Box shapes using local protocol fixtures; live inference has not been verified
@@ -154,7 +154,7 @@ because credentials were unavailable. Vercel request serialization is covered
 offline; successful live image inference is not claimed here. Direct TypeSafe
 validation is recorded in [validation](validation.md).
 
-Sources checked 2026-10-17: [TypeSafe Images](https://docs.typesafe.ai/images),
+Sources re-checked 2026-11-28: [TypeSafe Images](https://docs.typesafe.ai/images),
 [TypeSafe Models](https://docs.typesafe.ai/models), [TypeSafe Box](https://docs.typesafe.ai/primitives/box),
 [TypeSafe API](https://docs.typesafe.ai/api), [Cloudflare Jev 1.14](https://developers.cloudflare.com/ai/models/typesafe/jev-1.14.0/),
 [OpenRouter multimodal Decisions](https://openrouter.ai/docs/guides/community/multimodal-decisions),

@@ -244,6 +244,10 @@ class OpenAiDecisionCodecTest {
         assertThrows(IllegalArgumentException.class, () -> request(" ", questions(URGENT)));
         List<Question<?>> unsupported = List.of(
                 NoulQuestion.of("q", List.of("instruction")),
+                NoulQuestion.ofCriteria("q", "yes", "no"),
+                ChoiceQuestion.of("q", Team.class),
+                ChoiceQuestion.of("q", Map.of("A", "a", "B", "b")),
+                ScoreQuestion.of("q", List.of("Low", "High")),
                 URGENT.withCriteria("yes", "no"), URGENT.withCriteria(null, null),
                 ChoiceQuestion.of("q", "choose", Map.of("A", Map.of("detail", "structured"))),
                 ChoiceQuestion.of("q", "choose", Map.of("A", List.of("structured"))),
@@ -254,6 +258,31 @@ class OpenAiDecisionCodecTest {
         for (Question<?> question : unsupported) {
             assertThrows(IllegalArgumentException.class, () -> request("ticket", questions(question)));
         }
+        assertThrows(IllegalArgumentException.class, () -> NoulQuestion.ofCriteria("q", null, null));
+        var criteriaOnly = NoulQuestion.ofCriteria("q", "Yes", null);
+        assertThrows(IllegalArgumentException.class, () -> criteriaOnly.withCriteria(null, null));
+        assertThrows(NullPointerException.class, () -> ChoiceQuestion.of("q", null, Team.class));
+        assertThrows(NullPointerException.class, () -> ScoreQuestion.of("q", null, List.of("Low", "High")));
+        assertThrows(NullPointerException.class, () -> NoulQuestion.of("q", null));
+    }
+
+    @Test void optionalInstructionsAndOneSidedNoulCriteriaEncodeForTypeSafeAndRejectLegacyVercel() {
+        var choice = ChoiceQuestion.of("team", Team.class).withDescriptions(Map.of(Team.BILLING, "Billing", Team.TECHNICAL, "Tech"));
+        var score = ScoreQuestion.of("severity", List.of("Low", "High"));
+        var noul = NoulQuestion.ofCriteria("urgent", "Time sensitive", null);
+        var body = EvaluationCodec.request("state", questions(choice, score, noul), "jev-latest", WireFormat.TYPESAFE);
+        assertFalse(body.at("/questions/team").has("instructions"));
+        assertEquals("Billing", body.at("/questions/team/criteria/BILLING").asText());
+        assertFalse(body.at("/questions/severity").has("instructions"));
+        assertFalse(body.at("/questions/urgent").has("instructions"));
+        assertEquals("Time sensitive", body.at("/questions/urgent/criteria/true").asText());
+        assertFalse(body.at("/questions/urgent/criteria").has("false"));
+        assertThrows(IllegalArgumentException.class, () ->
+                EvaluationCodec.request("state", questions(choice), "typesafe-ai/jev", WireFormat.VERCEL));
+        assertThrows(IllegalArgumentException.class, () ->
+                EvaluationCodec.request("state", questions(score), "typesafe-ai/jev", WireFormat.VERCEL));
+        assertThrows(IllegalArgumentException.class, () ->
+                EvaluationCodec.request("state", questions(noul), "typesafe-ai/jev", WireFormat.VERCEL));
     }
 
     @Test void encodesStructuredStateAndQuestionInstructionsAsJsonParts() throws Exception {

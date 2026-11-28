@@ -18,9 +18,15 @@ Version 0.3.0 added OpenAI Decisions: text/image inputs, typed string/boolean
 choices, scoring, per-question refusals and request-level safety identifiers.
 The existing Jev question and record interfaces remain available; see the
 [OpenAI guide](docs/openai-decisions.md) for both APIs and their boundaries.
-**Version 0.6.0 adds OpenAI Decisions GA support:** JSON input, conversation/tool
-history, multipart questions and prompt-cache controls. The official contract
-was checked on 2026-10-23; see [release notes](docs/releases/0.6.0.md).
+**Version 0.6.0 added OpenAI Decisions GA support:** JSON input, conversation/tool
+history, multipart questions and prompt-cache controls.
+**Version 0.7.0 syncs upstream provider contracts (checked 2026-11-28):** adds
+TypeSafe `listModels()` (`GET /v1/models`), opt-in TypeSafe long-context support
+(`TypeSafe-Danger-Zone-Long-Context: true`) and `TypeSafeRequestOptions`,
+optional question instructions and one-sided Noul criteria, OpenRouter refusal
+failure handling, Vercel decision-model v4 `maxOutputTokens` and `reasoning`
+options, and OpenAI generic blank/repeated Score label preservation; see
+[release notes](docs/releases/0.7.0.md).
 
 ## Installation
 
@@ -42,7 +48,7 @@ For direct TypeSafe access:
 <dependency>
   <groupId>io.github.gudcks0305</groupId>
   <artifactId>jev-typesafe</artifactId>
-  <version>0.6.0</version>
+  <version>0.7.0</version>
 </dependency>
 ```
 
@@ -58,7 +64,7 @@ Gradle Kotlin DSL:
 repositories { mavenCentral() }
 
 dependencies {
-    implementation("io.github.gudcks0305:jev-typesafe:0.6.0")
+    implementation("io.github.gudcks0305:jev-typesafe:0.7.0")
 }
 ```
 
@@ -183,13 +189,33 @@ Enum labels use `Enum.name()`. Add enum descriptions with `withDescriptions(Map.
 
 `evaluateAsync(state, questions...)` returns a cancellable `CompletableFuture<Evaluation>`. Reuse clients and close them when the application stops. Use blocking `evaluate()` only from blocking code.
 
+`ChoiceQuestion.of(id, ...)` and `ScoreQuestion.of(id, levels)` also accept omitted instructions when criteria alone define the judgment, and `NoulQuestion.ofCriteria(id, yes, no)` creates criteria-only yes/no questions (including one-sided `null` criteria) for TypeSafe, OpenRouter, Cloudflare, and Vercel `DECISION_V4`.
+
+With `TypeSafeJevClient`, call `listModels()` / `listModelsAsync()` for `GET /v1/models`, enable `TypeSafeJevClient.builder().longContext(true)` or pass `TypeSafeRequestOptions` per call for `TypeSafe-Danger-Zone-Long-Context: true` (262k context) or per-request model selection:
+
+```java
+import io.github.gudcks0305.jev.NoulQuestion;
+import io.github.gudcks0305.jev.typesafe.TypeSafeJevClient;
+import io.github.gudcks0305.jev.typesafe.TypeSafeModelList;
+import io.github.gudcks0305.jev.typesafe.TypeSafeRequestOptions;
+
+try (var client = TypeSafeJevClient.builder().build()) {
+    TypeSafeModelList models = client.listModels();
+    var clause = NoulQuestion.of("termination", "Can either party terminate early?");
+    var result = client.evaluate("Long contract text...",
+            TypeSafeRequestOptions.withLongContext(), clause);
+    System.out.println(models.models().size() + ": " + result.answer(clause).probability());
+}
+```
+
 `VercelJevClient.builder().build()` keeps the evaluation-model v4 protocol by
 default. Opt into decision-model v4 with
-`.protocol(VercelJevClient.Protocol.DECISION_V4)` to send image state through
-Vercel Gateway. Default models remain `jev-latest` for direct TypeSafe and
-`typesafe-ai/jev` for Vercel. Vercel also offers a public TypeSafe-compatible
-route usable with `TypeSafeJevClient`; see the [Vercel guide](docs/vercel-ai-gateway.md)
-for its explicit key, model, and URL.
+`.protocol(VercelJevClient.Protocol.DECISION_V4)` to send image state, optional
+`.maxOutputTokens(...)`, or `.reasoning(...)` through Vercel Gateway. Default
+models remain `jev-latest` for direct TypeSafe (now resolving to `jev-1.14.0`,
+checked 2026-11-28) and `typesafe-ai/jev` for Vercel. Vercel also offers a
+public TypeSafe-compatible route usable with `TypeSafeJevClient`; see the
+[Vercel guide](docs/vercel-ai-gateway.md) for its explicit key, model, and URL.
 
 ## Experimental images and Box
 
@@ -260,8 +286,12 @@ OpenRouter may omit probability distributions, confidence, legend, model, and
 usage metadata. Missing values stay absent (score legends can fall back to the
 request's levels). Returned `id`, `provider`, and `usage.cost` remain available
 in `rawResponse()`. OpenRouter criteria support strings/objects/arrays; choice
-descriptions may be null, score levels may not, and Noul descriptions must be
-provided for both true and false or omitted together.
+descriptions may be null, score levels may not, and Noul criteria support
+one-sided or omitted instructions; any `refusal` answer fails the whole
+evaluation with `JevException.Kind.REFUSAL`. OpenRouter also exposes a
+TypeSafe-compatible `POST https://openrouter.ai/api/v1/systemone` route usable
+with `TypeSafeJevClient.builder().baseUrl(URI.create("https://openrouter.ai/api"))`
+(checked 2026-11-28).
 
 ## Cloudflare
 
@@ -286,7 +316,7 @@ The starter includes five provider adapters and defaults to TypeSafe over JDK `H
 <dependency>
   <groupId>io.github.gudcks0305</groupId>
   <artifactId>jev-spring-boot-starter</artifactId>
-  <version>0.6.0</version>
+  <version>0.7.0</version>
 </dependency>
 ```
 
@@ -308,7 +338,7 @@ The base starter does not pull in WebFlux. Add the optional module and select it
 <dependency>
   <groupId>io.github.gudcks0305</groupId>
   <artifactId>jev-spring-webflux</artifactId>
-  <version>0.6.0</version>
+  <version>0.7.0</version>
 </dependency>
 ```
 
@@ -411,6 +441,9 @@ public final class JevClients implements AutoCloseable {
 | `jev.enabled` | `true` | Enable auto-configuration |
 | `jev.provider` | `typesafe` | `typesafe`, `openrouter`, `vercel`, `cloudflare`, or `openai` |
 | `jev.vercel-protocol` | `evaluation-v4` | For Vercel: opt into `decision-v4` for image state parts |
+| `jev.long-context` | `false` | For TypeSafe: opt into `TypeSafe-Danger-Zone-Long-Context: true` |
+| `jev.vercel-max-output-tokens` | unset | For Vercel `decision-v4`: positive `maxOutputTokens` override |
+| `jev.vercel-reasoning` | unset | For Vercel `decision-v4`: `provider-default`, `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max` |
 | `jev.transport` | `jdk` | `jdk` or `webclient` |
 | `jev.api-key` | provider environment variable | Explicit key override |
 | `jev.model` | provider default | Model ID |
@@ -429,8 +462,9 @@ whole evaluation without returning partial answers or substituting a value.
 Since 0.6.0, it also accepts JSON state and structured instructions, including
 `@JevLabels`; 0.5.0 retains the earlier text-only limits.
 
-Vercel decision-model v4 also fails the whole evaluation with `REFUSAL` when
-any question is refused. Its images belong in explicit state parts; Box is unsupported.
+OpenRouter and Vercel decision-model v4 also fail the whole evaluation with
+`JevException.Kind.REFUSAL` when any question is refused. Vercel images belong
+in explicit state parts; Box is unsupported on Vercel.
 
 Only explicit **429, 529, 502, 503, and 504** responses retry. Connection failures and ambiguous timeouts do not automatically retry because the service may already have processed and billed the request. There is no automatic provider fallback.
 

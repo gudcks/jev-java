@@ -102,6 +102,42 @@ class VercelDecisionTest {
         assertThrows(IllegalArgumentException.class, () -> VercelDecisionInput.builder().text(" "));
         assertThrows(NullPointerException.class, () -> VercelDecisionInput.builder().image(null));
         assertThrows(NullPointerException.class, () -> VercelJevClient.builder().protocol(null));
+        assertThrows(IllegalArgumentException.class, () -> VercelJevClient.builder().maxOutputTokens(0));
+        assertThrows(IllegalArgumentException.class, () -> VercelJevClient.builder().maxOutputTokens(-5));
+        assertThrows(NullPointerException.class, () -> VercelJevClient.builder().reasoning(null));
+        assertThrows(IllegalArgumentException.class, () -> VercelJevClient.builder().maxOutputTokens(256).build());
+        assertThrows(IllegalArgumentException.class,
+                () -> VercelJevClient.builder().reasoning(VercelJevClient.Reasoning.LOW).build());
+    }
+
+    @Test void forwardsMaxOutputTokensAndReasoningAndOptionalInstructionsOnlyOnDecisionV4() throws Exception {
+        var stub = new Stub(response());
+        for (var level : VercelJevClient.Reasoning.values()) {
+            try (var client = VercelJevClient.builder()
+                    .apiKey("fixture-key")
+                    .protocol(VercelJevClient.Protocol.DECISION_V4)
+                    .maxOutputTokens(512)
+                    .reasoning(level)
+                    .transport(stub)
+                    .build()) {
+                var optionalRoute = ChoiceQuestion.of("route", Map.of("yes", "Yes", "no", "No"));
+                var oneSided = NoulQuestion.ofCriteria("present", "Present", null);
+                var optionalScore = ScoreQuestion.of("score", List.of("Low", "High"));
+                client.evaluate("state", oneSided, optionalRoute, optionalScore);
+                assertEquals(512, stub.body.path("maxOutputTokens").intValue());
+                assertEquals(level.wireValue(), stub.body.path("reasoning").textValue());
+                assertFalse(stub.body.at("/questions/route").has("instructions"));
+                assertFalse(stub.body.at("/questions/present").has("instructions"));
+                assertEquals("Present", stub.body.at("/questions/present/criteria/true").textValue());
+                assertFalse(stub.body.at("/questions/present/criteria").has("false"));
+                assertFalse(stub.body.at("/questions/score").has("instructions"));
+            }
+        }
+        try (var plain = decision(stub)) {
+            plain.evaluate("state", PRESENT, ROUTE, SCORE);
+            assertFalse(stub.body.has("maxOutputTokens"));
+            assertFalse(stub.body.has("reasoning"));
+        }
     }
 
     @ParameterizedTest

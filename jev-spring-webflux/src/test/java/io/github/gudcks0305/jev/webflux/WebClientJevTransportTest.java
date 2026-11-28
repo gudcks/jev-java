@@ -7,6 +7,7 @@ import io.github.gudcks0305.jev.JevException;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.core.io.buffer.DataBuffer;
 import org.springframework.web.reactive.function.client.ClientRequest;
@@ -366,6 +367,35 @@ class WebClientJevTransportTest {
                 () -> new WebClientJevTransport(client, Duration.ofSeconds(1), -1));
         assertThrows(IllegalArgumentException.class,
                 () -> new WebClientJevTransport(client, Duration.ofSeconds(1), 11));
+    }
+
+    @Test
+    void getsJsonWithoutContentTypeAndRetriesAndCancels() throws Exception {
+        AtomicInteger exchanges = new AtomicInteger();
+        WebClient client = client(request -> {
+            assertEquals(HttpMethod.GET, request.method());
+            assertNull(request.headers().getFirst(HttpHeaders.CONTENT_TYPE));
+            assertEquals("secret", request.headers().getFirst(HttpHeaders.AUTHORIZATION));
+            if (exchanges.incrementAndGet() == 1) {
+                return Mono.just(response(429, "rate limited", "0"));
+            }
+            return Mono.just(response(200, "{\"models\":[]}"));
+        });
+        WebClientJevTransport transport = transport(client, Duration.ofSeconds(2), 1);
+
+        JsonNode result = transport.get(
+                URI, Map.of(HttpHeaders.AUTHORIZATION, "secret", HttpHeaders.ACCEPT, "application/json")).get();
+        assertTrue(result.get("models").isArray());
+        assertEquals(2, exchanges.get());
+
+        AtomicBoolean cancelled = new AtomicBoolean();
+        WebClientJevTransport slowTransport = transport(client(request ->
+                Mono.<ClientResponse>never().doOnCancel(() -> cancelled.set(true))), Duration.ofMillis(100), 0);
+        assertEquals(JevException.Kind.TIMEOUT, failure(slowTransport.get(URI, Map.of())).kind());
+        assertTrue(cancelled.get());
+
+        slowTransport.close();
+        assertEquals(JevException.Kind.CLOSED, failure(slowTransport.get(URI, Map.of())).kind());
     }
 
     private WebClientJevTransport transport(WebClient client, Duration timeout, int retries) {

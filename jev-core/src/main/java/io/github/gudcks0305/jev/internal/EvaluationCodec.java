@@ -49,7 +49,12 @@ public final class EvaluationCodec {
         questions.forEach((id, question) -> {
             if (format == WireFormat.OPENROUTER) validateOpenRouterCriteria(question);
             ObjectNode entry = encoded.putObject(id);
-            entry.set("instructions", question.instructions());
+            JsonNode instructions = question.instructions();
+            if (instructions != null) {
+                entry.set("instructions", instructions);
+            } else if (format == WireFormat.VERCEL) {
+                throw new IllegalArgumentException("Vercel evaluation-model v4 requires question instructions");
+            }
             if (question instanceof BoxQuestion) {
                 entry.put("type", "box");
             } else if (question instanceof ChoiceQuestion<?> choice) {
@@ -60,10 +65,11 @@ public final class EvaluationCodec {
                 entry.set("criteria", score.criteria());
             } else if (question instanceof NoulQuestion noul) {
                 entry.put("type", gateway ? "boolean" : "noul");
-                JsonNode criteria = noul.criteria();
-                if (criteria != null && !(format == WireFormat.OPENROUTER
-                        && criteria.path("true").isNull() && criteria.path("false").isNull())) {
-                    entry.set("criteria", criteria);
+                ObjectNode encodedCriteria = encodeNoulCriteria(noul);
+                if (encodedCriteria != null) {
+                    entry.set("criteria", encodedCriteria);
+                } else if (instructions == null) {
+                    throw new IllegalArgumentException("Noul question requires instructions or at least one criterion");
                 }
             }
         });
@@ -94,14 +100,19 @@ public final class EvaluationCodec {
         JsonNode payload = normalized;
         JsonNode wireAnswers = payload.path("answers");
         require(wireAnswers.isObject() && wireAnswers.size() == questions.size(), "Answer ids do not match requested questions");
-        if (format == WireFormat.VERCEL_DECISION) {
+        if (format == WireFormat.VERCEL_DECISION || format == WireFormat.OPENROUTER) {
             boolean refused = false;
             for (String id : questions.keySet()) {
                 JsonNode answer = wireAnswers.path(id);
                 require(answer.isObject(), "Missing or invalid answer");
                 if (answer.path("type").isTextual() && answer.path("type").textValue().equals("refusal")) refused = true;
             }
-            if (refused) throw new JevException(JevException.Kind.REFUSAL, "Vercel refused an evaluation question");
+            if (refused) {
+                String message = format == WireFormat.OPENROUTER
+                        ? "OpenRouter refused an evaluation question"
+                        : "Vercel refused an evaluation question";
+                throw new JevException(JevException.Kind.REFUSAL, message);
+            }
         }
         Map<String, Answer> answers = new LinkedHashMap<>();
         questions.forEach((id, question) -> {
@@ -191,6 +202,17 @@ public final class EvaluationCodec {
     private static OptionalDouble confidence(JsonNode node) {
         return node.isMissingNode() || node.isNull() ? OptionalDouble.empty() : OptionalDouble.of(probability(node));
     }
+    private static ObjectNode encodeNoulCriteria(NoulQuestion noul) {
+        if (noul.criteria() == null) return null;
+        JsonNode criteria = JsonSupport.materialize(noul.criteria());
+        JsonNode yes = criteria.path("true");
+        JsonNode no = criteria.path("false");
+        ObjectNode encoded = JsonSupport.object();
+        if (!yes.isMissingNode() && !yes.isNull()) encoded.set("true", yes);
+        if (!no.isMissingNode() && !no.isNull()) encoded.set("false", no);
+        return encoded.isEmpty() ? null : encoded;
+    }
+
     private static void validateOpenRouterCriteria(Question<?> question) {
         if (question instanceof ChoiceQuestion<?> choice) {
             JsonSupport.materialize(choice.criteria()).elements().forEachRemaining(value -> requireCriterion(value, true));
@@ -200,9 +222,8 @@ public final class EvaluationCodec {
             JsonNode criteria = JsonSupport.materialize(noul.criteria());
             JsonNode yes = criteria.path("true");
             JsonNode no = criteria.path("false");
-            if (yes.isNull() && no.isNull()) return;
-            requireCriterion(yes, false);
-            requireCriterion(no, false);
+            if (!yes.isMissingNode() && !yes.isNull()) requireCriterion(yes, false);
+            if (!no.isMissingNode() && !no.isNull()) requireCriterion(no, false);
         }
     }
     private static void requireCriterion(JsonNode node, boolean allowNull) {

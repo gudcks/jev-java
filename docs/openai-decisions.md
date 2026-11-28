@@ -209,14 +209,14 @@ must remain strings or null, Score levels strings, and Noul criteria are
 rejected. Box and `JevInput` image wrappers are rejected for OpenAI; use the
 native `DecisionInput` API for images.
 
-Source builds after 0.6.0 preserve empty and whitespace-only Score labels in
-generic `evaluate` calls, matching the native `decide` API. Labels are not
+Since 0.7.0, generic `evaluate` calls preserve empty, whitespace-only, and
+repeated Score labels, matching the native `decide` API. Labels are not
 trimmed or deduplicated: their zero-based positions identify the levels, and
-response labels must match those positions exactly. Non-string levels remain
-unsupported. This corrects 0.6.0's overly strict generic validation; it does not
-change the question instructions or the other providers. The official
+response labels must match those positions exactly. Non-string levels and
+omitted question instructions remain unsupported on OpenAI. The official
 [Score schema](https://developers.openai.com/api/reference/resources/decisions/methods/create)
-permits empty labels (`minLength: 0`), checked 2026-10-29.
+permits empty labels (`minLength: 0`), checked 2026-10-29 and re-checked
+2026-11-28 against `openai-java` `4.114.0`.
 
 Generic Jev evaluation treats any refusal as a whole-evaluation failure with
 `JevException.Kind.REFUSAL`; it does not return partial answers. Native

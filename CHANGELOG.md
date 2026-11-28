@@ -1,10 +1,32 @@
 # Changelog
 
-## Unreleased
+## 0.7.0 — 2026-11-28
 
+- TypeSafe client adds `listModels()` / `listModelsAsync()` (`GET /v1/models`
+  returning `TypeSafeModelList` / `TypeSafeModel`), opt-in long-context support
+  (`TypeSafe-Danger-Zone-Long-Context: true` via `.longContext(true)` or Spring
+  `jev.long-context=true`), and per-request `TypeSafeRequestOptions` (model and
+  long-context overrides) across manual and record APIs.
+- `JevTransport` gains a backwards-compatible default `get(...)` method,
+  implemented by both `HttpTransport` and `WebClientJevTransport` with existing
+  deadline, retry, cancellation, and error sanitization guarantees.
+- `ChoiceQuestion`, `ScoreQuestion`, and `NoulQuestion` now support optional
+  instructions (`ChoiceQuestion.of(id, ...)`, `ScoreQuestion.of(id, levels)`,
+  `NoulQuestion.ofCriteria(id, yes, no)`) and one-sided Noul criteria across
+  TypeSafe, OpenRouter, Cloudflare, and Vercel `DECISION_V4` (legacy Vercel
+  `EVALUATION_V4` and OpenAI continue rejecting omitted instructions).
+- OpenRouter adapter aligns with the current Decisions contract: supports
+  optional instructions and one-sided Noul criteria, and fails the batch with
+  `JevException.Kind.REFUSAL` when any answer returns `type: "refusal"`.
+- Vercel `DECISION_V4` adds optional `.maxOutputTokens(...)` and `.reasoning(...)`
+  (`VercelJevClient.Reasoning` and Spring `jev.vercel-max-output-tokens` /
+  `jev.vercel-reasoning`).
 - OpenAI generic Score evaluation preserves empty, whitespace-only and repeated
   string labels, matching the native Decisions contract. Levels remain identified
   by their zero-based index; non-string labels are still rejected.
+
+See [release notes](docs/releases/0.7.0.md) and
+[validation evidence](docs/validation.md).
 
 ## 0.6.0 — 2026-10-23
 

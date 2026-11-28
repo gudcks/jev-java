@@ -4,19 +4,24 @@ Originally checked on 2026-09-20; Netlify guidance checked on 2026-09-26;
 Venice and AI/ML API guidance checked on 2026-09-28; additional compatible
 services and Vercel public API guidance checked on 2026-10-01; TypeSafe images,
 Box, models, and API checked on 2026-10-16; OpenRouter, Vercel decision-model v4,
-and Cloudflare Jev 1.14 image contracts checked on 2026-10-17.
+and Cloudflare Jev 1.14 image contracts checked on 2026-10-17; OpenAI GA checked
+on 2026-10-23; TypeSafe OpenAPI/SDKs, OpenRouter Decisions, Vercel decision-model v4,
+OpenAI `openai-java`, and Cloudflare contracts re-checked on 2026-11-28.
 This SDK is unofficial.
 
-## OpenAI Decisions (adapter since 0.3.0; GA contract checked 2026-10-23)
+## OpenAI Decisions (adapter since 0.3.0; GA contract checked 2026-10-23, re-checked 2026-11-28)
 
 `jev-openai` implements OpenAI's `POST https://api.openai.com/v1/decisions`
 with Bearer `OPENAI_API_KEY` and default model `gpt-6-luna`, independent of Jev.
-OpenAI's API is generally available; its contract was checked on 2026-10-23.
+OpenAI's API is generally available; its contract was checked on 2026-10-23 and
+re-checked on 2026-11-28 against `openai-java` `4.114.0` (`273ed57`).
 The current contract supports text, images, JSON and conversation/tool history,
 plus cache controls, up to 400 questions and 128 images per request. See the
 [GA guide](https://developers.openai.com/api/docs/guides/decisions) for the full
 shape. Java GA support is included starting with 0.6.0;
-`0.5.0` artifacts do not include these additions.
+`0.5.0` artifacts do not include these additions. Since 0.7.0, generic Score
+evaluation preserves empty, whitespace-only and repeated string labels by
+zero-based level index, matching the native `decide` contract.
 
 The native `decide` API returns typed predicate, choice and score answers,
 ordered by question, with individual refusals. Usage and unknown response
@@ -40,26 +45,36 @@ parts, and Box remains unsupported by this provider.
 ## TypeSafe direct
 
 - `POST https://api.typesafe.ai/v1/systemone`
+- `GET https://api.typesafe.ai/v1/models` (`TypeSafeJevClient.listModels()` / `listModelsAsync()`, since 0.7.0)
 - `Authorization: Bearer <TYPESAFE_API_KEY>`
-- Body: `model`, `state`, named `questions`.
+- Body: `model`, `state`, named `questions` (since 0.7.0, `instructions` may be omitted on `Choice`, `Score`, and criteria-defined `Noul` questions, and `Noul` supports one-sided criteria).
 - Primitives: `choice`, `noul`, `score`; experimental Jev 1.14 `box`.
 - Responses: named `answers`, resolved `model`, snake_case token usage.
 - Experimental images: PNG/JPEG assets may be referenced from string values in
   `state`, `instructions`, and `criteria`. Direct TypeSafe requests with images
   or a `box` question require `TypeSafe-Danger-Zone-Images: true`.
+- Long context (since 0.7.0): opt into `TypeSafe-Danger-Zone-Long-Context: true`
+  via `TypeSafeJevClient.builder().longContext(true)`, per-request
+  `TypeSafeRequestOptions.withLongContext()`, or Spring `jev.long-context=true`
+  to expand per-request and per-question context limits from 64k/32k to 262k
+  tokens on Jev 1.13 and 1.14.
+- Request rules (checked 2026-11-28): 32 MiB body limit, 64 nested container
+  levels per field, finite JSON numbers; server accepts `gzip`/`zstd` request
+  encoding (Java SDK sends uncompressed UTF-8 JSON without needing extra native
+  codecs).
 
-Sources: [HTTP API](https://docs.typesafe.ai/api), [models](https://docs.typesafe.ai/models), [structured criteria](https://docs.typesafe.ai/primitives/advanced).
+Sources: [HTTP API](https://docs.typesafe.ai/api), [models](https://docs.typesafe.ai/models), [list models](https://docs.typesafe.ai/api/list-models), [request rules](https://docs.typesafe.ai/api/errors), [structured criteria](https://docs.typesafe.ai/primitives/advanced).
 
 TypeSafe documents images for Jev 1.13 and 1.14; Box requires model
-`jev-1.14.0` (or the moving `jev-preview` alias). The `jev-latest` alias
-currently points to stable `jev-1.13.0`, so the SDK default supports images but
-not Box. The model catalog's input table still says text, while the dedicated
-[Images guide](https://docs.typesafe.ai/images) documents image support; see
-the full contract and provider boundaries in [images and Box](images.md).
-TypeSafe warns that formats, limits, and accuracy may change. Java image APIs
-first shipped for direct TypeSafe in 0.4.0; provider extensions are in 0.5.0.
-See [validation](validation.md) for offline coverage and provider-specific live
-status.
+`jev-1.14.0` (or `jev-latest` / `jev-preview`, both resolving to `jev-1.14.0` as
+checked on 2026-11-28). TypeSafe's model catalog lists text and image inputs
+for both models; see the full contract and provider boundaries in
+[images and Box](images.md). TypeSafe warns that formats, limits, and accuracy
+may change. Pin `jev-1.14.0` when tuning thresholds or using Box so alias
+moves do not alter behavior unexpectedly. Java image APIs first shipped for
+direct TypeSafe in 0.4.0; provider extensions are in 0.5.0; model listing and
+long-context headers arrived in 0.7.0. See [validation](validation.md) for
+offline coverage and provider-specific live status.
 
 Netlify AI Gateway documents Jev through this TypeSafe API rather than a
 separate Java wire format. It supplies `TYPESAFE_API_KEY` and
@@ -122,7 +137,10 @@ evaluation-model v4 default:
 - Body: JSON `state`, named `questions`; no file-part representation.
 
 Opt-in decision-model v4 uses `ai-decision-model-specification-version: 4`,
-`ai-model-id`, and `stateParts`. A file part has `type: "file"`, `mediaType`,
+`ai-model-id`, and `stateParts`. Since 0.7.0, it also forwards optional
+`maxOutputTokens` and `reasoning` (`provider-default`, `none`, `minimal`,
+`low`, `medium`, `high`, `xhigh`, `max`) and permits omitted question
+instructions / one-sided Noul criteria. A file part has `type: "file"`, `mediaType`,
 and tagged data `{type: "data", data: <base64>}`. This protocol supports images
 in state only; instructions and criteria remain JSON input. The Gateway's
 published question support and response schema omit Box. The old and new v4
@@ -134,10 +152,10 @@ returned HTTP 403 without a successful inference result. Treat live success as u
 and Cloudflare likewise have offline protocol coverage only because credentials
 were unavailable.
 
-Sources checked 2026-10-17: [TypeSafe-compatible API](https://vercel.com/docs/ai-gateway/sdks-and-apis/typesafe),
+Sources re-checked 2026-11-28: [TypeSafe-compatible API](https://vercel.com/docs/ai-gateway/sdks-and-apis/typesafe),
 [Vercel Jev 1.14 image support](https://vercel.com/changelog/typesafe-ais-jev-1-14-is-now-available-on-ai-gateway),
-[Gateway decision model at source commit `fce9210`](https://github.com/vercel/ai/blob/fce9210c6405c0ad8452fee3f50717e8ea910b97/packages/gateway/src/gateway-decision-model.ts),
-[Gateway decision-model tests](https://github.com/vercel/ai/blob/fce9210c6405c0ad8452fee3f50717e8ea910b97/packages/gateway/src/gateway-decision-model.test.ts).
+[Gateway decision model at commit `83026e8`](https://github.com/vercel/ai/blob/83026e8c7f7e73d4131c49746f4e9cb123e211c7/packages/gateway/src/gateway-decision-model.ts),
+[Gateway decision-model tests](https://github.com/vercel/ai/blob/83026e8c7f7e73d4131c49746f4e9cb123e211c7/packages/gateway/src/gateway-decision-model.test.ts).
 
 | Meaning | Direct | Gateway | Java |
 | --- | --- | --- | --- |
@@ -149,12 +167,12 @@ Sources checked 2026-10-17: [TypeSafe-compatible API](https://vercel.com/docs/ai
 
 No score normalization, confidence inference, or probability renormalization occurs. Two-decimal display rounding can make probability sums differ slightly from one. Missing/extra answers, mismatched types, unknown labels, invalid level indices, nonnumeric or out-of-range probabilities are protocol failures. Unknown metadata is preserved in the raw response.
 
-## OpenRouter (since 0.1.1)
+## OpenRouter (since 0.1.1; re-checked 2026-11-28)
 
-- `POST https://openrouter.ai/api/alpha/decisions`
+- `POST https://openrouter.ai/api/alpha/decisions` (OpenRouter also documents a TypeSafe-compatible `POST https://openrouter.ai/api/v1/systemone` route usable via `TypeSafeJevClient` with `baseUrl=https://openrouter.ai/api`).
 - `Authorization: Bearer <OPENROUTER_API_KEY>`
-- Default model: `typesafe/jev-1.13`; body includes `model`, `state`, `questions`.
-- Native `noul`, `choice`, and `score` answers; snake_case `input_tokens` / `output_tokens`.
+- Default model in `OpenRouterJevClient`: `typesafe/jev-1.13` (OpenRouter also lists `typesafe/jev-1.14` and `~typesafe/jev-latest`); body includes `model`, `state`, `questions`.
+- Native `noul`, `choice`, `score`, `box`, and `refusal` answers; snake_case `input_tokens` / `output_tokens`. Since 0.7.0, any `refusal` answer fails the evaluation with `JevException.Kind.REFUSAL`.
 - Since 0.5.0, experimental PNG/JPEG assets may be referenced in state,
   instructions, or criteria; `box` questions are supported with Jev 1.14.
 - Pin `.model("typesafe/jev-1.14")` for Box. Images become inline
@@ -164,17 +182,20 @@ No score normalization, confidence inference, or probability renormalization occ
   usage, response id and provider are optional. Metadata including `usage.cost`
   is preserved in the raw response without fabricating missing values.
 - Criteria descriptions are string/object/array values; choice also permits
-  null. Score levels cannot be null. Noul criteria need both sides; two null
-  descriptions are encoded as omitted criteria, as in the official provider.
+  null. Score levels cannot be null. Since 0.7.0, `instructions` may be omitted
+  on `noul`, `choice`, and `score` (not `box`), and `noul` criteria may provide
+  only `true` or only `false`; two null descriptions are encoded as omitted
+  criteria, matching `OpenRouterTeam/ai-sdk-provider` commit `9f6ca11`.
 
 Sources: [multimodal Decisions](https://openrouter.ai/docs/guides/community/multimodal-decisions),
 [Box questions](https://openrouter.ai/docs/guides/community/jev#box-questions),
+[TypeSafe SDK compatibility](https://openrouter.ai/docs/guides/community/typesafe-sdk),
 [official Decisions API](https://openrouter.ai/docs/api/api-reference/alphadecisions/submit-a-decisions-questions-and-answers-request),
-[official schema at 1b22b05](https://github.com/OpenRouterTeam/ai-sdk-provider/blob/1b22b05352cb0f9243a6c3fdd326038dd3705544/src/evaluation/schemas.ts),
-[official mapping](https://github.com/OpenRouterTeam/ai-sdk-provider/blob/1b22b05352cb0f9243a6c3fdd326038dd3705544/src/evaluation/index.ts).
-This is an alpha API. Image and Box request/response contracts have offline
-fixture coverage; live OpenRouter inference has not been verified because
-credentials were unavailable.
+[official schema at 9f6ca11](https://github.com/OpenRouterTeam/ai-sdk-provider/blob/9f6ca11/src/evaluation/schemas.ts),
+[official mapping at 9f6ca11](https://github.com/OpenRouterTeam/ai-sdk-provider/blob/9f6ca11/src/evaluation/index.ts).
+This is an alpha API. Image, Box, refusal, and optional-instruction request/response
+contracts have offline fixture coverage; live OpenRouter inference has not been
+verified because credentials were unavailable.
 
 ## Cloudflare (since 0.2.0)
 

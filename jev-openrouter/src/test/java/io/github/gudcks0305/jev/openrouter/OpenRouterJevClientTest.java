@@ -193,17 +193,54 @@ class OpenRouterJevClientTest {
     }
 
     @Test
-    void validatesOpenRouterCriteriaBeforeTransportAndOmitsAllNullNoulCriteria() throws Exception {
+    void validatesOpenRouterCriteriaBeforeTransportAndOmitsNullNoulCriteriaAndOptionalInstructions() throws Exception {
         Stub stub = new Stub(singleNoulResponse());
         NoulQuestion noDescriptions = NoulQuestion.of("urgent", "Urgent?").withCriteria(null, null);
         try (var client = client(stub)) {
             client.evaluate("state", noDescriptions);
             assertFalse(stub.body.at("/questions/urgent").has("criteria"));
+
+            NoulQuestion oneSided = NoulQuestion.of("urgent", "Urgent?").withCriteria(null, "No");
+            client.evaluate("state", oneSided);
+            assertFalse(stub.body.at("/questions/urgent/criteria").has("true"));
+            assertEquals("No", stub.body.at("/questions/urgent/criteria/false").asText());
+        }
+
+        Stub optionalStub = new Stub(response());
+        var optionalChoice = ChoiceQuestion.of("route", Team.class);
+        var optionalNoul = NoulQuestion.ofCriteria("urgent", "Yes", null);
+        var optionalScore = ScoreQuestion.of("severity", List.of("Low", "Medium", "High"));
+        try (var client = client(optionalStub)) {
+            client.evaluate("state", optionalChoice, optionalNoul, optionalScore);
+            assertFalse(optionalStub.body.at("/questions/route").has("instructions"));
+            assertFalse(optionalStub.body.at("/questions/urgent").has("instructions"));
+            assertEquals("Yes", optionalStub.body.at("/questions/urgent/criteria/true").asText());
+            assertFalse(optionalStub.body.at("/questions/urgent/criteria").has("false"));
+            assertFalse(optionalStub.body.at("/questions/severity").has("instructions"));
         }
 
         assertRejectedBeforeTransport(ChoiceQuestion.of("bad", "Pick", Map.of("yes", true, "no", "No")));
         assertRejectedBeforeTransport(ScoreQuestion.of("bad", "Rate", Arrays.asList("Low", null, "High")));
-        assertRejectedBeforeTransport(NoulQuestion.of("bad", "Decide").withCriteria(null, "No"));
+        assertRejectedBeforeTransport(NoulQuestion.of("bad", "Decide").withCriteria(null, true));
+        assertRejectedBeforeTransport(NoulQuestion.of("bad", "Decide").withCriteria(42, null));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"route", "urgent", "severity"})
+    void anyRefusalFailsWholeOpenRouterBatchBeforeDecodingSiblings(String refusedId) throws Exception {
+        ObjectNode body = (ObjectNode) response();
+        ObjectNode answers = (ObjectNode) body.path("answers");
+        answers.set(refusedId, JSON.createObjectNode().put("type", "refusal"));
+        if (!refusedId.equals("urgent")) {
+            ((ObjectNode) answers.path("urgent")).put("noul", -1);
+        }
+        try (var client = client(new Stub(body))) {
+            JevException error = assertThrows(
+                    JevException.class, () -> client.evaluate("state", route, urgent, severity));
+            assertEquals(JevException.Kind.REFUSAL, error.kind());
+            assertEquals(0, error.statusCode());
+            assertFalse(error.getMessage().contains(refusedId));
+        }
     }
 
     private void assertRejectedBeforeTransport(io.github.gudcks0305.jev.Question<?> question) throws Exception {

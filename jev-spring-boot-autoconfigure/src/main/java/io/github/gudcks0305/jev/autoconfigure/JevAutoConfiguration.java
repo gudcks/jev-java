@@ -81,6 +81,9 @@ public class JevAutoConfiguration {
         if (properties.getEndpoint() != null) {
             builder.endpoint(properties.getEndpoint());
         }
+        if (properties.isLongContext()) {
+            builder.longContext(true);
+        }
         return builder.build();
     }
 
@@ -104,6 +107,12 @@ public class JevAutoConfiguration {
         if (properties.getEndpoint() != null) {
             builder.endpoint(properties.getEndpoint());
         }
+        if (properties.getVercelMaxOutputTokens() != null) {
+            builder.maxOutputTokens(properties.getVercelMaxOutputTokens());
+        }
+        if (properties.getVercelReasoning() != null) {
+            builder.reasoning(vercelReasoning(properties.getVercelReasoning()));
+        }
         return builder.build();
     }
 
@@ -114,6 +123,17 @@ public class JevAutoConfiguration {
             case "decision-v4" -> VercelJevClient.Protocol.DECISION_V4;
             default -> throw new IllegalArgumentException("jev.vercel-protocol must be evaluation-v4 or decision-v4");
         };
+    }
+
+    private static VercelJevClient.Reasoning vercelReasoning(String value) {
+        String normalized = value.trim().toLowerCase(Locale.ROOT);
+        for (VercelJevClient.Reasoning option : VercelJevClient.Reasoning.values()) {
+            if (option.wireValue().equals(normalized)) {
+                return option;
+            }
+        }
+        throw new IllegalArgumentException(
+                "jev.vercel-reasoning must be one of provider-default, none, minimal, low, medium, high, xhigh, max");
     }
 
     private static JevClient openRouterClient(JevProperties properties, JevTransport transport) {

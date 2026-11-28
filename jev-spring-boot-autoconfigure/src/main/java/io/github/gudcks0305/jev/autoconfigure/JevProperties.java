@@ -31,6 +31,15 @@ public class JevProperties {
     /** Vercel protocol: evaluation-v4 (default) or decision-v4. Read only for Vercel. */
     private String vercelProtocol = "evaluation-v4";
 
+    /** TypeSafe danger-zone long-context opt-in. Read only for TypeSafe. */
+    private boolean longContext;
+
+    /** Optional maxOutputTokens forwarded on Vercel decision-v4 requests. */
+    private Integer vercelMaxOutputTokens;
+
+    /** Optional reasoning effort forwarded on Vercel decision-v4 requests. */
+    private String vercelReasoning;
+
     /** Cloudflare account ID. When omitted, Cloudflare reads {@code CLOUDFLARE_ACCOUNT_ID}. */
     private String accountId;
 
@@ -97,6 +106,33 @@ public class JevProperties {
 
     public String getVercelProtocol() { return vercelProtocol; }
     public void setVercelProtocol(String vercelProtocol) { this.vercelProtocol = vercelProtocol; }
+
+    public boolean isLongContext() {
+        return this.longContext;
+    }
+
+    public void setLongContext(boolean longContext) {
+        this.longContext = longContext;
+    }
+
+    public Integer getVercelMaxOutputTokens() {
+        return this.vercelMaxOutputTokens;
+    }
+
+    public void setVercelMaxOutputTokens(Integer vercelMaxOutputTokens) {
+        if (vercelMaxOutputTokens != null && vercelMaxOutputTokens <= 0) {
+            throw new IllegalArgumentException("jev.vercel-max-output-tokens must be positive");
+        }
+        this.vercelMaxOutputTokens = vercelMaxOutputTokens;
+    }
+
+    public String getVercelReasoning() {
+        return this.vercelReasoning;
+    }
+
+    public void setVercelReasoning(String vercelReasoning) {
+        this.vercelReasoning = vercelReasoning;
+    }
 
     public String getAccountId() {
         return this.accountId;
